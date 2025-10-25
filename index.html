@@ -1,35 +1,176 @@
-function buildTable(dat,title){
-  document.getElementById('sheetName').textContent=title;
-  const tbl=document.getElementById('dataTable'); tbl.innerHTML='';
-  dat.forEach(r=>{
-    const tr=document.createElement('tr');
-    r.forEach(c=>{
-      const td=document.createElement('td'); td.textContent=c||'';
-      td.onclick=()=>startEdit(td);
-      tr.appendChild(td);
-    }); tbl.appendChild(tr);
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>חלונית מהירה — Google Sheets (API + ניהול רשימה)</title>
+  <style>
+    :root{--bg:#0f172a;--card:#111827;--tile:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--ring:#38bdf8}
+    body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
+    .wrap{max-width:1100px;margin:20px auto;padding:0 16px}
+    header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .title{font-size:28px;font-weight:800}
+    .badge{font-size:12px;background:#0b3a27;color:#86efac;border:1px solid #14532d;border-radius:999px;padding:4px 8px}
+    .bar{background:var(--card);border:1px solid #334155;border-radius:12px;padding:10px;margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .input{background:var(--tile);color:var(--text);border:1px solid #374151;border-radius:10px;padding:10px 12px;min-width:220px}
+    .btn{background:var(--card);border:1px solid #475569;border-radius:10px;padding:10px 12px;color:var(--text);cursor:pointer}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:16px}
+    .tile{background:var(--tile);border:1px solid #334155;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    /* Modal */
+    #editorOverlay{display:none;position:fixed;inset:0;background:#0008;backdrop-filter:blur(6px);align-items:center;justify-content:center;z-index:9999}
+    #editorModal{width:60vw;height:60vh;background:#0f172a;border-radius:12px;display:flex;flex-direction:column;overflow:hidden;border:1px solid #334155}
+    #editorHeader{padding:8px 12px;background:#1e293b;display:flex;justify-content:space-between;align-items:center}
+    #tableWrap{flex:1;overflow:auto;padding:10px}
+    table{width:100%;border-collapse:collapse}
+    td,th{border:1px solid #334155;padding:4px 8px;min-width:80px}
+    td.editing{background:#334155}
+    .hint{color:var(--muted);font-size:12px}
+  </style>
+  <script src="https://apis.google.com/js/api.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="title">חלונית מהירה — Sheets</div>
+      <div class="badge" id="authState">טרם התחברת</div>
+    </header>
+
+    <div class="bar">
+      <input id="search" class="input" placeholder="חיפוש לפי שם…" />
+      <span style="flex:1"></span>
+      <input id="name" class="input" placeholder="שם לתצוגה" />
+      <input id="url" class="input" placeholder="URL של Google Sheets (קישור עריכה)" style="min-width:320px" />
+      <button id="add" class="btn">➕ הוסף</button>
+      <button id="exportBtn" class="btn">ייצוא JSON</button>
+      <input id="importFile" type="file" accept="application/json" class="btn" />
+      <button id="signin" class="btn">התחבר לגוגל</button>
+    </div>
+
+    <div id="grid" class="grid"></div>
+    <p class="hint">טיפ: לחיצה על שם הפריט → שינוי שם. הנתונים נשמרים ב‑localStorage ולכן תוכל להוסיף/למחוק כמה שתרצה.</p>
+  </div>
+
+  <div id="editorOverlay">
+    <div id="editorModal">
+      <div id="editorHeader">
+        <strong id="sheetName">גיליון</strong>
+        <div>
+          <button id="closeEditor" class="btn">✕ סגור</button>
+        </div>
+      </div>
+      <div id="tableWrap"><table id="dataTable"></table></div>
+    </div>
+  </div>
+
+<script>
+// ====== CONFIG (OAuth) ======
+const CLIENT_ID='824465183488-hvma8ui3bgsku6mv6e8ut5qhkkgona0u.apps.googleusercontent.com';
+const DISCOVERY='https://sheets.googleapis.com/$discovery/rest?version=v4';
+const SCOPE='https://www.googleapis.com/auth/spreadsheets.readonly'; // כרגע צפייה מלאה; נשדרג לעריכה לאחר שנבדוק
+
+// ====== STORAGE ======
+const storeKey='fast-sheets:list:v2';
+function loadList(){
+  const raw=localStorage.getItem(storeKey);
+  if(raw){ try{return JSON.parse(raw);}catch(e){} }
+  // seed ראשוני — תוכל למחוק/להחליף אחרי טעינה
+  return [
+    {name:'Sheet #1',url:'https://docs.google.com/spreadsheets/d/1bQMT-RbpUmMPfOd7X8dnJZTM_-N8gXHmggVuL7SPSNE/edit#gid=0'},
+    {name:'Sheet #2',url:'https://docs.google.com/spreadsheets/d/1YAHsceJD-vO4uIHNNtgc8bDbQ0uhZH-ASLlPiyL-51o/edit#gid=0'},
+    {name:'Sheet #3',url:'https://docs.google.com/spreadsheets/d/1bSd0GcLaiSLUaE2bhmsFE60DzMlhNeByDhp_gLUF1eM/edit#gid=0'}
+  ];
+}
+function saveList(list){ localStorage.setItem(storeKey,JSON.stringify(list)); }
+let items=loadList();
+
+// ====== RENDER ======
+const $=sel=>document.querySelector(sel);
+function render(filter=''){
+  const g=$('#grid'); g.innerHTML='';
+  const filtered=items.filter(x=>!filter||x.name.toLowerCase().includes(filter.toLowerCase()));
+  filtered.forEach((it,idx)=>{
+    const card=document.createElement('div'); card.className='tile';
+    card.innerHTML=`
+      <div style='display:flex;justify-content:space-between;align-items:center;gap:8px'>
+        <strong class='rename' data-i='${idx}' title='לחץ כדי לשנות שם'>${idx+1}. ${escapeHtml(it.name)}</strong>
+        <span class='hint'>${(sheetIdFromUrl(it.url)||'').slice(0,6)}…</span>
+      </div>
+      <div class='actions'>
+        <button class='btn' data-act='open' data-i='${idx}'>פתח בטאב</button>
+        <button class='btn' data-act='editHere' data-i='${idx}'>ערוך כאן</button>
+        <button class='btn' data-act='del' data-i='${idx}'>מחק</button>
+      </div>`;
+    g.appendChild(card);
   });
-  document.getElementById('editorOverlay').style.display='flex';
 }
+render();
 
-let editing=null;
-function startEdit(td){
-  if(editing) finishEdit();
-  editing=td; td.classList.add('editing');
-  const v=td.textContent; td.innerHTML=<input id='ed' value="${v}" style='width:100%;background:#475569;color:white;border:0;'>;
-  document.getElementById('ed').focus();
-}
-function finishEdit(){ if(!editing)return; const inp=editing.querySelector('input'); if(inp){ editing.textContent=inp.value; editing.classList.remove('editing'); editing=null; }}
+// ====== HELPERS ======
+function escapeHtml(s){return String(s).replace(/[&<>\"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m]));}
+function validUrl(u){ try{ new URL(u); return u.includes('docs.google.com/spreadsheets'); }catch(e){ return false; } }
+function sheetIdFromUrl(url){ return url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1]||null; }
 
-document.getElementById('grid').onclick=e=>{
-  if(e.target.tagName!=='BUTTON')return;
-  const i=e.target.dataset.i, act=e.target.dataset.act;
-  if(act==='open') window.open(items[i].url,'_blank');
-  if(act==='editHere'){ loadSheet(sheetIdFromUrl(items[i].url)); }
+// ====== EVENTS UI ======
+$('#add').onclick=()=>{
+  const name=$('#name').value.trim();
+  const url=$('#url').value.trim();
+  if(!name) return alert('תן שם לפריט');
+  if(!validUrl(url)) return alert('שים URL חוקי של Google Sheets');
+  items.push({name,url}); saveList(items); $('#name').value=''; $('#url').value=''; render($('#search').value);
+};
+$('#search').oninput=e=>render(e.target.value);
+$('#grid').addEventListener('click',e=>{
+  const btn=e.target.closest('button');
+  if(btn){
+    const i=+btn.dataset.i; const act=btn.dataset.act; const item=items[i];
+    if(act==='open') window.open(item.url,'_blank');
+    if(act==='editHere') openEditor(item);
+    if(act==='del'){ if(confirm('למחוק?')){ items.splice(i,1); saveList(items); render($('#search').value);} }
+  }
+  const rn=e.target.closest('.rename');
+  if(rn){ const i=+rn.dataset.i; const nn=prompt('שם חדש:', items[i].name); if(nn!==null){ items[i].name=nn.trim()||items[i].name; saveList(items); render($('#search').value);} }
+});
+
+$('#exportBtn').onclick=()=>{
+  const blob=new Blob([JSON.stringify(items,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='sheets-launcher.json'; a.click();
+};
+$('#importFile').onchange=async(e)=>{
+  const f=e.target.files?.[0]; if(!f) return; const txt=await f.text();
+  try{ const data=JSON.parse(txt); if(!Array.isArray(data)) throw new Error('פורמט לא תקין'); items=data; saveList(items); render($('#search').value); alert('יובא בהצלחה'); }
+  catch(err){ alert('שגיאה: '+err.message); }
 };
 
-document.getElementById('closeEditor').onclick=()=>{
-  finishEdit(); document.getElementById('editorOverlay').style.display='none';
-};
-</script></body>
+// ====== GOOGLE API (READ-ONLY PREVIEW לעריכה בהמשך) ======
+let gapiReady=false;
+async function initGapi(){ if(gapiReady) return; await new Promise(r=>gapi.load('client:auth2',r)); await gapi.client.init({clientId:CLIENT_ID,discoveryDocs:[DISCOVERY],scope:SCOPE}); gapiReady=true; updateAuthBadge(); }
+async function ensureSignIn(){ await initGapi(); const inst=gapi.auth2.getAuthInstance(); if(!inst.isSignedIn.get()) await inst.signIn(); updateAuthBadge(); }
+function updateAuthBadge(){ try{ const ok=gapi.auth2.getAuthInstance().isSignedIn.get(); $('#authState').textContent= ok?'מחובר לגוגל ✔︎':'טרם התחברת'; $('#authState').style.background= ok?'#0b3a27':'#3f1e1e'; $('#authState').style.borderColor= ok?'#14532d':'#7f1d1d'; }catch(_){} }
+$('#signin').onclick=()=>ensureSignIn();
+
+async function openEditor(item){
+  const id=sheetIdFromUrl(item.url); if(!id) return alert('כתובת לא תקינה');
+  try{
+    await ensureSignIn();
+    const meta=await gapi.client.sheets.spreadsheets.get({spreadsheetId:id});
+    const first=meta.result.sheets[0];
+    const title=first.properties.title; const dim=first.properties.gridProperties;
+    const range=`'${title}'!A1:${toCol(dim.columnCount)}${dim.rowCount}`;
+    const values=(await gapi.client.sheets.spreadsheets.values.get({spreadsheetId:id,range})).result.values||[];
+    buildTable(values,title);
+  }catch(err){ console.error(err); alert('שגיאת גישה: ודא שהתחברת עם חשבון שיש לו הרשאה לגיליון'); }
+}
+function toCol(n){ let s=''; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26);} return s; }
+function buildTable(values,title){
+  $('#sheetName').textContent=title; const tbl=$('#dataTable'); tbl.innerHTML='';
+  values.forEach(row=>{ const tr=document.createElement('tr'); (row||[]).forEach(cell=>{ const td=document.createElement('td'); td.textContent=cell??''; td.onclick=()=>startEdit(td); tr.appendChild(td); }); tbl.appendChild(tr); });
+  $('#editorOverlay').style.display='flex';
+}
+let editing=null; function startEdit(td){ if(editing) finishEdit(); editing=td; td.classList.add('editing'); const v=td.textContent; td.innerHTML=`<input id="ed" value="${v}" style="width:100%;background:#475569;color:#fff;border:0;">`; $('#ed').focus(); }
+function finishEdit(){ if(!editing) return; const inp=editing.querySelector('input'); if(inp){ editing.textContent=inp.value; } editing.classList.remove('editing'); editing=null; }
+$('#closeEditor').onclick=()=>{ finishEdit(); $('#editorOverlay').style.display='none'; };
+window.addEventListener('keydown',e=>{ if(e.key==='Escape') $('#closeEditor').click(); });
+</script>
+</body>
 </html>
