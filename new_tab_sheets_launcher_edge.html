@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>חלונית מהירה — Google Sheets</title>
+  <style>
+    :root {
+      --bg: #0f172a; /* slate-900 */
+      --card: #111827; /* gray-900 */
+      --muted: #94a3b8; /* slate-400 */
+      --text: #e5e7eb; /* gray-200 */
+      --accent: #22c55e; /* green-500 */
+      --danger: #ef4444; /* red-500 */
+      --ring: #38bdf8; /* sky-400 */
+      --tile: #1f2937; /* gray-800 */
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; background: var(--bg); color: var(--text); }
+    a { color: inherit; text-decoration: none; }
+    .wrap { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    header { display:flex; align-items:center; gap:12px; justify-content: space-between; }
+    .title { font-size: 22px; font-weight: 700; letter-spacing: 0.2px; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap: wrap; }
+    .input, select { background: var(--tile); color: var(--text); border:1px solid #374151; border-radius: 10px; padding:10px 12px; outline: none; }
+    .input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px #38bdf833; }
+    .btn { border:1px solid #374151; background: var(--card); color: var(--text); padding:10px 12px; border-radius: 10px; cursor:pointer; transition: 120ms; }
+    .btn:hover { border-color: #475569; transform: translateY(-1px); }
+    .btn-primary { background: #14532d; border-color:#166534; }
+    .btn-primary:hover { background:#166534; }
+    .btn-danger { background:#3f1e1e; border-color:#7f1d1d; }
+    .hint { color: var(--muted); font-size: 12px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin-top: 16px; }
+    .tile { background: var(--tile); border:1px solid #334155; border-radius: 14px; padding:14px; display:flex; flex-direction:column; gap:12px; }
+    .tile h3 { margin:0; font-size: 16px; line-height:1.1; }
+    .tile .actions { display:flex; gap:8px; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; padding:2px 6px; border:1px solid #475569; border-radius:6px; font-size:12px; color:#cbd5e1; }
+    .bar { background: var(--card); border:1px solid #334155; border-radius: 14px; padding:12px; margin-top: 16px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .spacer { flex:1; }
+    details { background: var(--card); border:1px solid #334155; border-radius: 14px; padding: 10px 12px; margin-top: 14px; }
+    details[open] summary { margin-bottom: 10px; }
+    summary { cursor:pointer; }
+    .tiny { font-size: 11px; color:#9ca3af; }
+    .badge { font-size: 11px; background:#0b3a27; color:#86efac; border:1px solid #14532d; border-radius:999px; padding:4px 8px; }
+    .toggle { display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+    .toggle input { accent-color: #16a34a; width:18px; height:18px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="title">חלונית מהירה — Sheets</div>
+      <div class="row">
+        <span class="badge">תצוגת כרטיסייה חדשה מותאמת</span>
+      </div>
+    </header>
+
+    <div class="bar" role="region" aria-label="חיפוש והוספה">
+      <input id="search" class="input" placeholder="חיפוש לפי שם… (סינון מידי)" style="min-width:260px" />
+      <div class="spacer"></div>
+      <input id="name" class="input" placeholder="שם לתצוגה" />
+      <input id="url" class="input" placeholder="URL של Google Sheets (קישור עריכה)" style="min-width:300px" />
+      <button id="add" class="btn btn-primary">➕ הוסף</button>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <label class="toggle"><input type="checkbox" id="autoOpenToggle"> פתיחה אוטומטית של הפריט הראשון בעת פתיחת כרטיסייה (0.4 שנ׳)</label>
+      <button id="openAll" class="btn">פתח את הראשון עכשיו</button>
+      <span class="hint">טיפ: לחץ על <span class="kbd">1…9</span> כדי לפתוח במהירות את הפריט ה‑1 עד ה‑9.</span>
+    </div>
+
+    <div id="grid" class="grid" aria-live="polite"></div>
+
+    <details>
+      <summary>ייבוא/ייצוא והגדרות מתקדמות</summary>
+      <div class="row">
+        <button id="exportBtn" class="btn">ייצוא JSON</button>
+        <input id="importFile" type="file" accept="application/json" class="btn" />
+        <button id="resetBtn" class="btn btn-danger">איפוס הכל</button>
+      </div>
+      <p class="tiny">הערה: הרשימה נשמרת ב‑localStorage של הדפדפן. זה פרטי למחשב הזה. אם תרצה סנכרון בין מחשבים, אפשר בהמשך להפנות לרשימת URL-ים מקובץ JSON שמתארח אצלך (GitHub Pages / Drive שיתופי).</p>
+    </details>
+
+  </div>
+
+  <script>
+    // ---- Utilities ----
+    const $ = sel => document.querySelector(sel);
+    const storeKey = 'fast-sheets:list:v1';
+    const autoKey = 'fast-sheets:autoOpen';
+
+    function loadList() {
+      const raw = localStorage.getItem(storeKey);
+      if (raw) {
+        try { return JSON.parse(raw); } catch(e) {}
+      }
+      // Seed with user's three sheets
+      return [
+        { name: 'Sheet #1', url: 'https://docs.google.com/spreadsheets/d/1bQMT-RbpUmMPfOd7X8dnJZTM_-N8gXHmggVuL7SPSNE/edit?gid=0#gid=0' },
+        { name: 'Sheet #2', url: 'https://docs.google.com/spreadsheets/d/1YAHsceJD-vO4uIHNNtgc8bDbQ0uhZH-ASLlPiyL-51o/edit?gid=0#gid=0' },
+        { name: 'Sheet #3', url: 'https://docs.google.com/spreadsheets/d/1bSd0GcLaiSLUaE2bhmsFE60DzMlhNeByDhp_gLUF1eM/edit?gid=0#gid=0' },
+      ];
+    }
+
+    function saveList(list) {
+      localStorage.setItem(storeKey, JSON.stringify(list));
+    }
+
+    function validUrl(u) {
+      try { new URL(u); return u.includes('docs.google.com/spreadsheets'); } catch(e){ return false; }
+    }
+
+    // ---- State ----
+    let items = loadList();
+
+    // ---- Render ----
+    function render(filter='') {
+      const grid = $('#grid');
+      grid.innerHTML = '';
+      const filtered = items.filter(x => !filter || x.name.toLowerCase().includes(filter.toLowerCase()));
+      filtered.forEach((item, idx) => {
+        const card = document.createElement('div');
+        card.className = 'tile';
+        const n = (idx+1);
+        card.innerHTML = `
+          <div style="display:flex; align-items:center; gap:10px; justify-content: space-between;">
+            <h3 title="${item.url}">${n}. ${escapeHtml(item.name || 'ללא שם')}</h3>
+            <div class="hint">${shortenId(item.url)}</div>
+          </div>
+          <div class="actions">
+            <button class="btn" data-action="open">פתח כאן</button>
+            <button class="btn" data-action="newtab">פתח בטאב חדש</button>
+            <button class="btn" data-action="rename">שנה שם</button>
+            <button class="btn btn-danger" data-action="delete">מחק</button>
+          </div>
+        `;
+        card.querySelectorAll('button').forEach(btn => {
+          btn.addEventListener('click', () => handleAction(btn.dataset.action, item));
+        });
+        grid.appendChild(card);
+      });
+    }
+
+    function handleAction(action, item) {
+      switch(action) {
+        case 'open':
+          location.href = item.url; // replace current tab
+          break;
+        case 'newtab':
+          window.open(item.url, '_blank');
+          break;
+        case 'rename':
+          const nn = prompt('שם חדש עבור הפריט:', item.name || '');
+          if (nn !== null) {
+            item.name = nn.trim() || item.name;
+            saveList(items); render($('#search').value);
+          }
+          break;
+        case 'delete':
+          if (confirm('למחוק את הפריט הזה?')) {
+            items = items.filter(x => x !== item);
+            saveList(items); render($('#search').value);
+          }
+          break;
+      }
+    }
+
+    function shortenId(url) {
+      // Extract spreadsheet ID for a compact label
+      const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      return m ? m[1].slice(0,6) + '…' : '';
+    }
+
+    function escapeHtml(str){
+      return String(str).replace(/[&<>\"]+/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
+    }
+
+    // ---- Events ----
+    $('#add').addEventListener('click', () => {
+      const name = $('#name').value.trim();
+      const url = $('#url').value.trim();
+      if (!name) return alert('תן שם לתצוגה.');
+      if (!validUrl(url)) return alert('שים URL חוקי של Google Sheets (קישור עריכה).');
+      items.push({ name, url });
+      saveList(items);
+      $('#name').value = ''; $('#url').value='';
+      render($('#search').value);
+    });
+
+    $('#search').addEventListener('input', (e) => render(e.target.value));
+
+    // Keyboard quick open (1..9)
+    window.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const n = parseInt(e.key, 10);
+      if (!isNaN(n) && n > 0) {
+        const filtered = items.filter(x => !$('#search').value || x.name.toLowerCase().includes($('#search').value.toLowerCase()));
+        const item = filtered[n-1];
+        if (item) {
+          location.href = item.url;
+        }
+      }
+    });
+
+    // Auto-open first item (fast)
+    const autoToggle = $('#autoOpenToggle');
+    autoToggle.checked = localStorage.getItem(autoKey) === '1';
+    autoToggle.addEventListener('change', () => {
+      localStorage.setItem(autoKey, autoToggle.checked ? '1' : '0');
+    });
+
+    if (autoToggle.checked && items.length) {
+      setTimeout(() => { location.href = items[0].url; }, 400);
+    }
+
+    $('#openAll').addEventListener('click', () => {
+      if (items[0]) location.href = items[0].url;
+    });
+
+    // Export/Import/Reset
+    $('#exportBtn').addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify(items, null, 2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'sheets-launcher.json';
+      a.click();
+    });
+
+    $('#importFile').addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      try {
+        const data = JSON.parse(text);
+        if (!Array.isArray(data)) throw new Error('פורמט לא תקין');
+        // Simple validation
+        data.forEach(it => { if (!it.name || !it.url) throw new Error('חסר name/url'); });
+        items = data;
+        saveList(items);
+        render($('#search').value);
+        alert('הייבוא הושלם.');
+      } catch (err) {
+        alert('שגיאה בייבוא: ' + err.message);
+      }
+    });
+
+    $('#resetBtn').addEventListener('click', () => {
+      if (confirm('לאפס את כל ההגדרות והרשימה?')) {
+        localStorage.removeItem(storeKey);
+        location.reload();
+      }
+    });
+
+    // Initial render
+    render();
+  </script>
+</body>
+</html>
