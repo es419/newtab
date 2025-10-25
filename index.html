@@ -28,6 +28,7 @@
     .hint{color:var(--muted);font-size:12px}
   </style>
   <script src="https://apis.google.com/js/api.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <div class="wrap">
@@ -143,31 +144,54 @@ $('#importFile').onchange=async(e)=>{
 };
 
 // ====== GOOGLE API (READ-ONLY PREVIEW לעריכה בהמשך) ======
-let gapiReady=false;
-async function initGapi(){ if(gapiReady) return; await new Promise(r=>gapi.load('client:auth2',r)); await gapi.client.init({clientId:CLIENT_ID,discoveryDocs:[DISCOVERY],scope:SCOPE}); gapiReady=true; updateAuthBadge(); }
-async function ensureSignIn(){ await initGapi(); const inst=gapi.auth2.getAuthInstance(); if(!inst.isSignedIn.get()) await inst.signIn(); updateAuthBadge(); }
-function updateAuthBadge(){ try{ const ok=gapi.auth2.getAuthInstance().isSignedIn.get(); $('#authState').textContent= ok?'מחובר לגוגל ✔︎':'טרם התחברת'; $('#authState').style.background= ok?'#0b3a27':'#3f1e1e'; $('#authState').style.borderColor= ok?'#14532d':'#7f1d1d'; }catch(_){} }
-$('#signin').onclick=()=>ensureSignIn();
+let tokenClient; let gapiReady=false; let gisReady=false;
+
+async function initGapi(){ if(gapiReady) return; await new Promise(r=>gapi.load('client',r)); await gapi.client.init({ discoveryDocs:[DISCOVERY] }); gapiReady=true; updateAuthBadge(); }
+function initGis(){
+  if(gisReady) return;
+  if(!window.google || !google.accounts || !google.accounts.oauth2){ setTimeout(initGis,200); return; }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPE,
+    prompt: 'consent', // נכפה חלון התחברות
+    callback: (resp)=>{
+      if(resp && resp.access_token){
+        gapi.client.setToken({access_token: resp.access_token});
+        updateAuthBadge();
+      }
+    }
+  });
+  gisReady=true;
+} tokenClient = google.accounts.oauth2.initTokenClient({ client_id: CLIENT_ID, scope: SCOPE, prompt: '', callback: (resp)=>{ if(resp && resp.access_token){ gapi.client.setToken({access_token: resp.access_token}); updateAuthBadge(); } } }); gisReady=true; }
+async function ensureSignIn(){ await initGapi(); initGis(); const tok=gapi.client.getToken?.(); if(!tok){ tokenClient.requestAccessToken(); } updateAuthBadge(); }
+function isSignedIn(){ try{ return !!(gapi.client && gapi.client.getToken()); } catch(_) { return false; } }
+function updateAuthBadge(){ const ok=isSignedIn(); $('#authState').textContent = ok? 'מחובר לגוגל ✔︎' : 'טרם התחברת'; $('#authState').style.background= ok?'#0b3a27':'#3f1e1e'; $('#authState').style.borderColor= ok?'#14532d':'#7f1d1d'; }
+$('#signin').onclick=()=>{
+  // ניסיון להבטיח שה-GIS נטען לפני הבקשה
+  initGis();
+  // נבקש אסימון עם prompt כדי לפתוח חלון במפורש בעת קליק (מונע חסימת פופאפים)
+  if(tokenClient){ tokenClient.requestAccessToken({prompt: 'consent'}); }
+  // בנוסף נטען את gapi ליתר בטחון
+  ensureSignIn();
+  // אם תוך 2 שניות אין טוקן → הצע להפעיל פופאפים
+  setTimeout(()=>{ if(!isSignedIn()) alert('אם לא נפתח חלון – אפשר את פופאפים ל-es419.github.io ובדוק שהוספת את https://es419.github.io ב-Authorized JavaScript origins.'); },2000);
+};
 
 async function openEditor(item){
   const id=sheetIdFromUrl(item.url); if(!id) return alert('כתובת לא תקינה');
   try{
-    await ensureSignIn();
+    await ensureSignIn(); if(!isSignedIn()) return alert('התחברות לגוגל נדרשת');
     const meta=await gapi.client.sheets.spreadsheets.get({spreadsheetId:id});
     const first=meta.result.sheets[0];
     const title=first.properties.title; const dim=first.properties.gridProperties;
     const range=`'${title}'!A1:${toCol(dim.columnCount)}${dim.rowCount}`;
     const values=(await gapi.client.sheets.spreadsheets.values.get({spreadsheetId:id,range})).result.values||[];
     buildTable(values,title);
-  }catch(err){ console.error(err); alert('שגיאת גישה: ודא שהתחברת עם חשבון שיש לו הרשאה לגיליון'); }
+  }catch(err){ console.error(err); alert('שגיאת גישה: ודא שההרשאה הופעלה לאפליקציה ועברת התחברות'); }
 }
 function toCol(n){ let s=''; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26);} return s; }
-function buildTable(values,title){
-  $('#sheetName').textContent=title; const tbl=$('#dataTable'); tbl.innerHTML='';
-  values.forEach(row=>{ const tr=document.createElement('tr'); (row||[]).forEach(cell=>{ const td=document.createElement('td'); td.textContent=cell??''; td.onclick=()=>startEdit(td); tr.appendChild(td); }); tbl.appendChild(tr); });
-  $('#editorOverlay').style.display='flex';
-}
-let editing=null; function startEdit(td){ if(editing) finishEdit(); editing=td; td.classList.add('editing'); const v=td.textContent; td.innerHTML=`<input id="ed" value="${v}" style="width:100%;background:#475569;color:#fff;border:0;">`; $('#ed').focus(); }
+function buildTable(values,title){ $('#sheetName').textContent=title; const tbl=$('#dataTable'); tbl.innerHTML=''; values.forEach(row=>{ const tr=document.createElement('tr'); (row||[]).forEach(cell=>{ const td=document.createElement('td'); td.textContent=cell??''; td.onclick=()=>startEdit(td); tr.appendChild(td); }); tbl.appendChild(tr); }); $('#editorOverlay').style.display='flex'; }
+let editing=null; function startEdit(td){ if(editing) finishEdit(); editing=td; td.classList.add('editing'); const v=td.textContent; td.innerHTML=`<input id=\"ed\" value=\"${v}\" style=\"width:100%;background:#475569;color:#fff;border:0;\">`; $('#ed').focus(); }
 function finishEdit(){ if(!editing) return; const inp=editing.querySelector('input'); if(inp){ editing.textContent=inp.value; } editing.classList.remove('editing'); editing=null; }
 $('#closeEditor').onclick=()=>{ finishEdit(); $('#editorOverlay').style.display='none'; };
 window.addEventListener('keydown',e=>{ if(e.key==='Escape') $('#closeEditor').click(); });
