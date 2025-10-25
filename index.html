@@ -1,91 +1,3 @@
-<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>חלונית מהירה — Google Sheets (API Enhanced)</title>
-  <style>
-    body { margin:0; font-family:system-ui; background:#0f172a; color:#e5e7eb; }
-    .wrap { max-width:1100px; margin:20px auto; padding:0 16px; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; }
-    .tile { background:#1f2937; border:1px solid #334155; padding:14px; border-radius:10px; }
-    button { padding:8px 12px; border-radius:8px; border:1px solid #475569; background:#111827; cursor:pointer; color:#e5e7eb; }
-    #editorOverlay { display:none; position:fixed; inset:0; background:#0008; backdrop-filter:blur(6px); align-items:center; justify-content:center; }
-    #editorModal { width:80vw; height:75vh; background:#0f172a; border-radius:12px; display:flex; flex-direction:column; overflow:hidden; }
-    #editorHeader { padding:8px 12px; background:#1e293b; display:flex; justify-content:space-between; }
-    #tableWrap { flex:1; overflow:auto; padding:10px; }
-    table { width:100%; border-collapse:collapse; }
-    td,th { border:1px solid #334155; padding:4px 8px; min-width:80px; }
-    td.editing { background:#334155; }
-  </style>
-  <script src="https://apis.google.com/js/api.js"></script>
-</head>
-<body>
-  <div class="wrap">
-    <h2>חלונית מהירה — Sheets + API</h2>
-    <div id="grid" class="grid"></div>
-  </div>
-
-  <div id="editorOverlay">
-    <div id="editorModal">
-      <div id="editorHeader">
-        <span id="sheetName">גיליון</span>
-        <button id="closeEditor">✕</button>
-      </div>
-      <div id="tableWrap"><table id="dataTable"></table></div>
-    </div>
-  </div>
-
-<script>
-const CLIENT_ID = '824465183488-hvma8ui3bgsku6mv6e8ut5qhkkgona0u.apps.googleusercontent.com';
-const DISCOVERY = 'https://sheets.googleapis.com/$discovery/rest?version=v4';
-const SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
-
-const items=[
- {name:'Sheet #1',url:'https://docs.google.com/spreadsheets/d/1bQMT-RbpUmMPfOd7X8dnJZTM_-N8gXHmggVuL7SPSNE/edit#gid=0'},
- {name:'Sheet #2',url:'https://docs.google.com/spreadsheets/d/1YAHsceJD-vO4uIHNNtgc8bDbQ0uhZH-ASLlPiyL-51o/edit#gid=0'},
- {name:'Sheet #3',url:'https://docs.google.com/spreadsheets/d/1bSd0GcLaiSLUaE2bhmsFE60DzMlhNeByDhp_gLUF1eM/edit#gid=0'}
-];
-
-function sheetIdFromUrl(url){ return url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1]; }
-
-function render(){
-  const grid=document.getElementById('grid');
-  grid.innerHTML='';
-  items.forEach((it,i)=>{
-    const d=document.createElement('div'); d.className='tile';
-    d.innerHTML=`<strong>${it.name}</strong><div style='margin-top:8px;display:flex;gap:6px'>
-      <button data-i='${i}' data-act='open'>פתח בטאב</button>
-      <button data-i='${i}' data-act='editHere'>ערוך כאן</button>
-    </div>`;
-    grid.appendChild(d);
-  });
-}
-render();
-
-async function ensureSignIn(){
-  if(!gapi.auth2) await initGapi();
-  if(!gapi.auth2.getAuthInstance().isSignedIn.get()) await gapi.auth2.getAuthInstance().signIn();
-}
-
-async function initGapi(){
-  await new Promise(res=>gapi.load('client:auth2',res));
-  await gapi.client.init({clientId:CLIENT_ID,discoveryDocs:[DISCOVERY],scope:SCOPE});
-}
-
-async function loadSheet(id){
-  await ensureSignIn();
-  const res=await gapi.client.sheets.spreadsheets.get({spreadsheetId:id});
-  const sheet=res.result.sheets[0];
-  const title=sheet.properties.title;
-  const dim=sheet.properties.gridProperties;
-  const range=`'${title}'!A1:${col(dim.columnCount)}${dim.rowCount}`;
-  const dat=(await gapi.client.sheets.spreadsheets.values.get({spreadsheetId:id,range})).result.values||[];
-  buildTable(dat,title);
-}
-
-function col(n){let s="";while(n>0){const m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=Math.floor((n-1)/26);}return s;}
-
 function buildTable(dat,title){
   document.getElementById('sheetName').textContent=title;
   const tbl=document.getElementById('dataTable'); tbl.innerHTML='';
@@ -104,7 +16,7 @@ let editing=null;
 function startEdit(td){
   if(editing) finishEdit();
   editing=td; td.classList.add('editing');
-  const v=td.textContent; td.innerHTML=`<input id='ed' value="${v}" style='width:100%;background:#475569;color:white;border:0;'>`;
+  const v=td.textContent; td.innerHTML=<input id='ed' value="${v}" style='width:100%;background:#475569;color:white;border:0;'>;
   document.getElementById('ed').focus();
 }
 function finishEdit(){ if(!editing)return; const inp=editing.querySelector('input'); if(inp){ editing.textContent=inp.value; editing.classList.remove('editing'); editing=null; }}
@@ -119,6 +31,5 @@ document.getElementById('grid').onclick=e=>{
 document.getElementById('closeEditor').onclick=()=>{
   finishEdit(); document.getElementById('editorOverlay').style.display='none';
 };
-</script>
-</body>
+</script></body>
 </html>
